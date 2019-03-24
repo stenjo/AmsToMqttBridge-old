@@ -16,7 +16,7 @@ void DlmsReader::Clear()
 
 bool DlmsReader::Read(byte data)
 {
-    if (position == 0 && data != 0x37)
+    if (position == 0 && data != 0x7E)
     {
         // we haven't started yet, wait for the start flag (no need to capture any data yet)
         return false;
@@ -32,22 +32,14 @@ bool DlmsReader::Read(byte data)
             Clear();
 
         // Check if this is a second start flag, which indicates the previous one was a stop from the last package
-        if (position == 1 && data == 0x37)
+        if (position == 1 && data == 0x7E)
         {
             // just return, we can keep the one byte we had in the buffer
-            // return false;
+            return false;
         }
 
         // We have started, so capture every byte
         buffer[position++] = data;
-        dataLength = 100;
-        // We're done, check the stop flag and signal we're done
-        if (data == 0xC0 && position > 80) {
-            dataLength = position-2;
-            return true;
-        }
-
-        return false;
 
         if (position == 1)
         {
@@ -58,23 +50,22 @@ bool DlmsReader::Read(byte data)
         {
             // Capture the Frame Format Type
             frameFormatType = (byte)(data & 0xF0);
- //           if (!IsValidFrameFormat(frameFormatType))
- //               Clear();
+            if (!IsValidFrameFormat(frameFormatType))
+                Clear();
             return false;
         }
         else if (position == 3)
         {
             // Capture the length of the data package
-            //dataLength = ((buffer[1] & 0x0F) << 8) | buffer[2];
-            dataLength = 98;
+            dataLength = ((buffer[1] & 0x0F) << 8) | buffer[2];
             return false;
         }
         else if (destinationAddressLength == 0)
         {
             // Capture the destination address
             destinationAddressLength = GetAddress(3, destinationAddress, 0, DLMS_READER_MAX_ADDRESS_SIZE);
-//            if (destinationAddressLength > 3)
-//                Clear();
+            if (destinationAddressLength > 3)
+                Clear();
             return false;
         }
         else if (sourceAddressLength == 0)
@@ -104,7 +95,7 @@ bool DlmsReader::Read(byte data)
         else if (position == dataLength + 2)
         {
             // We're done, check the stop flag and signal we're done
-            if (data == 0xC0)
+            if (data == 0x7E)
                 return true;
             else
             {

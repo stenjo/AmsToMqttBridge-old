@@ -2,7 +2,6 @@
  Name:		AmsToMqttBridge.ino
  Created:	3/13/2018 7:40:28 PM
  Author:	roarf
-			modified by stenjo for reading Aidon messages while waiting for HAN port to be up to standard
 */
 
 
@@ -12,6 +11,7 @@
 #include <PubSubClient.h>
 #include "HanReader.h"
 #include "Kaifa.h"
+#include "Aidon.h"
 #include "Kamstrup.h"
 #include "configuration.h"
 #include "accesspoint.h"
@@ -41,11 +41,11 @@ HanReader hanReader;
 void setup() 
 {
 	// Uncomment to debug over the same port as used for HAN communication
-	debugger = &Serial;
+	// debugger = &Serial;
 	
 	if (debugger) {
 		// Setup serial port for debugging
-		debugger->begin(9600);
+		debugger->begin(2400, SERIAL_8E1);
 		while (!&debugger);
 		debugger->println("Started...");
 	}
@@ -67,8 +67,7 @@ void setup()
 	if (!ap.isActivated)
 	{
 		setupWiFi();
-		delay(10000);
-		hanReader.setup(&Serial, 9600, SERIAL_8N1, debugger);
+		hanReader.setup(&Serial, 2400, SERIAL_8E1, debugger);
 		
 		// Compensate for the known Kaifa bug
 		hanReader.compensateFor09HeaderBug = (ap.config.meterType == 1);
@@ -155,20 +154,6 @@ void mqttMessageReceived(char* topic, unsigned char* payload, unsigned int lengt
 		debugger->println(message);
 	}
 
-	DynamicJsonBuffer jsonBuffer;
-	JsonObject& root = jsonBuffer.createObject();
-	JsonObject& data = root.createNestedObject("data");
-
-		// Get the temperature too
-	tempSensor.requestTemperatures();
-	float temperature = tempSensor.getTempCByIndex(0);
-	data["temp"] = String(temperature);
-
-	// Publish the json to the MQTT server
-	char msg[1024];
-	root.printTo(msg, 1024);
-	mqtt.publish(ap.config.mqttPublishTopic, "/energy/total/1183.87");
-
 	// Do whatever needed here...
 	// Ideas could be to query for values or to initiate OTA firmware update
 }
@@ -207,216 +192,107 @@ void readHanPort()
 	}
 }
 
-void readHanPort_Aidon(int listSize)
+void readHanPort_Aidon(int listSize) 
 {
+	if (debugger && listSize != 0x01 && listSize != 0x0D) {
+		debugger->print("Reading HAN Aidon. Listsize: ");
+		debugger->println(listSize);
+	}
+	// Only care for the ACtive Power Imported, which is found in the first list
+	if (/*listSize == (int)Aidon::List1 || */listSize == (int)Aidon::List2 || listSize == (int)Aidon::List3)
+	{
+		if (listSize == (int)Aidon::List1)
+		{
+			if (debugger) debugger->println(" (list #1 has no ID)");
+		}
+		else
+		{
+			String id = hanReader.getString((int)Aidon_List2::ListVersionIdentifier);
+			if (debugger) debugger->println(id);
+		}
 
-	DynamicJsonBuffer jsonBuffer;
-	JsonObject& root = jsonBuffer.createObject();
-	JsonObject& data = root.createNestedObject("data");
+		time_t time = hanReader.getPackageTime();
+		if (debugger && listSize != 0x01 && listSize != 0x0D) {
+			// Get the timestamp (as unix time) from the package
+			if (debugger) debugger->print("Time of the package is: ");
+			if (debugger) debugger->println(time);
+		}
+		// Define a json object to keep the data
+		//StaticJsonBuffer<500> jsonBuffer;
+		DynamicJsonBuffer jsonBuffer;
+		JsonObject& root = jsonBuffer.createObject();
+
+		// Any generic useful info here
+		root["id"] = WiFi.macAddress();
+		root["up"] = millis();
+		root["t"] = time;
+
+		// Add a sub-structure to the json object, 
+		// to keep the data from the meter itself
+		JsonObject& data = root.createNestedObject("data");
 
 		// Get the temperature too
-	tempSensor.requestTemperatures();
-	float temperature = tempSensor.getTempCByIndex(0);
-	data["temp"] = String(temperature);
-	data["list"] = String((float)listSize);
-	data["id"] = hanReader.getString(0, 16);
+		tempSensor.requestTemperatures();
+		float temperature = tempSensor.getTempCByIndex(0);
+		data["temp"] = String(temperature);
 
-	// 16-23: Import sum (Wh)
-	debugger->print("Forbruk sum (kWh): ");
-	//debugger->print(String((float)hanReader.getInt(16,4)/1000));
-	char value[1024];
-	sprintf(value, "%.2f", (float)hanReader.getInt(16,4)/1000);
-	mqtt.publish("ams2mqtt/energy/import/accumulated", value);
-	debugger->print(value);
+		// Based on the list number, get all details 
+		// according to OBIS specifications for the meter
+		if (listSize == (int)Aidon::List1)
+		{
+			data["P"] = hanReader.getInt((int)Aidon_List1::ActivePowerImported);
+		}
+		else if (listSize == (int)Aidon::List2)
+		{
+			data["lv"] = hanReader.getString((int)Aidon_List2::ListVersionIdentifier);
+			data["id"] = hanReader.getString((int)Aidon_List2::MeterID);
+			data["type"] = hanReader.getString((int)Aidon_List2::MeterType);
+			data["P"] = hanReader.getInt((int)Aidon_List2::ActiveImportPower);
+			data["PE"] = hanReader.getInt((int)Aidon_List2::ActiveExportPower);
+			data["Q"] = hanReader.getInt((int)Aidon_List2::ReactiveImportPower);
+			data["QE"] = hanReader.getInt((int)Aidon_List2::ReactiveExportPower);
+			data["I1"] = (float)hanReader.getInt((int)Aidon_List2::CurrentL1)/10;
+			data["I2"] = (float)hanReader.getInt((int)Aidon_List2::CurrentL2)/10;
+			data["I3"] = (float)hanReader.getInt((int)Aidon_List2::CurrentL3)/10;
+			data["U1"] = (float)hanReader.getInt((int)Aidon_List2::VoltageL1)/10;
+			data["U2"] = (float)hanReader.getInt((int)Aidon_List2::VoltageL2)/10;
+			data["U3"] = (float)hanReader.getInt((int)Aidon_List2::VoltageL3)/10;
+		}
+		else if (listSize == (int)Aidon::List3)
+		{
+			data["lv"] = hanReader.getString((int)Aidon_List3::ListVersionIdentifier);;
+			data["id"] = hanReader.getString((int)Aidon_List3::MeterID);
+			data["type"] = hanReader.getString((int)Aidon_List3::MeterType);
+			data["P"] = hanReader.getInt((int)Aidon_List3::ActiveImportPower);
+			data["Q"] = hanReader.getInt((int)Aidon_List3::ReactiveImportPower);
+			data["I1"] = (float)hanReader.getInt((int)Aidon_List3::CurrentL1)/10;
+			data["I2"] = (float)hanReader.getInt((int)Aidon_List3::CurrentL2)/10;
+			data["I3"] = (float)hanReader.getInt((int)Aidon_List3::CurrentL3)/10;
+			data["U1"] = (float)hanReader.getInt((int)Aidon_List3::VoltageL1)/10;
+			data["U2"] = (float)hanReader.getInt((int)Aidon_List3::VoltageL2)/10;
+			data["U3"] = (float)hanReader.getInt((int)Aidon_List3::VoltageL3)/10;
+			data["tPI"] = (float)hanReader.getInt((int)Aidon_List3::CumulativeActiveImportEnergy)/100;
+			data["tPO"] = (float)hanReader.getInt((int)Aidon_List3::CumulativeActiveExportEnergy)/100;
+			data["tQI"] = (float)hanReader.getInt((int)Aidon_List3::CumulativeReactiveImportEnergy)/100;
+			data["tQO"] = (float)hanReader.getInt((int)Aidon_List3::CumulativeReactiveExportEnergy)/100;
+		}
 
-	// 48-51: Import effekt totalt (W)
-	debugger->print("  Forbruk totalt (W): ");
-	sprintf(value, "%d", hanReader.getInt(48,4));
-	mqtt.publish("ams2mqtt/power/import/total", value);
-	debugger->print(value);
-
-	// 70-71: Import fase 1 (W)
-	debugger->print("  Forbruk fase 1 (W): ");
-	sprintf(value, "%d", hanReader.getInt(70,2));
-	mqtt.publish("ams2mqtt/power/import/phase1", value);
-	debugger->print(value);
-
-	// 74-75: Import fase 2 (W)
-	debugger->print("  Forbruk fase 2 (W): ");
-	sprintf(value, "%d", hanReader.getInt(74,2));
-	mqtt.publish("ams2mqtt/power/import/phase2", value);
-	debugger->print(value);
-
-	// 78-79: Import fase 3 (W)
-	debugger->print("  Forbruk fase 3 (W): ");
-	sprintf(value, "%d", hanReader.getInt(78,2));
-	mqtt.publish("ams2mqtt/power/import/phase3", value);
-	debugger->println(value);
-
- 
-	// 24-31: Eksport sum (Wh)
-	debugger->print("Eksport sum (kWh):    ");
-	//debugger->print(String((float)hanReader.getInt(24,4)/1000));
-	sprintf(value, "%.2f", (float)hanReader.getInt(24,4)/1000);
-	mqtt.publish("ams2mqtt/energy/export/accumulated", value);
-	debugger->print(value);
-
-	// 52-55: Eksport Effekt Totalt (W)
-	debugger->print("  Eksport totalt (W): ");
-	sprintf(value, "%d", hanReader.getInt(52,4));
-	mqtt.publish("ams2mqtt/power/export/total", value);
-	debugger->print(value);
-
-
-	// 72-73: Eksport fase 1 (W)
-	debugger->print("  Eksport fase 1 (W): ");
-	sprintf(value, "%d", hanReader.getInt(72,2));
-	mqtt.publish("ams2mqtt/power/export/phase1", value);
-	debugger->print(value);
-
-	// 76-77: Eksport fase 2 (W)
-	debugger->print("  Eksport fase 2 (W): ");
-	sprintf(value, "%d", hanReader.getInt(76,2));
-	mqtt.publish("ams2mqtt/power/export/phase2", value);
-	debugger->print(value);
-
-	// 80-81: Eksport fase 3 (W)
-	debugger->print("  Eksport fase 3 (W): ");
-	sprintf(value, "%d", hanReader.getInt(80,2));
-	mqtt.publish("ams2mqtt/power/export/phase3", value);
-	debugger->println(value);
-
-	// 88-89: Strøm fase 1 (A) *10
-	debugger->print("Strøm fase 1 (A): ");
-	//debugger->print(String((float)hanReader.getInt(88,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(88,2)/10);
-	mqtt.publish("ams2mqtt/current/phase1", value);
-	debugger->print(value);
-
-	// 90-91: Strøm fase 2 (A) *10
-	debugger->print("  Strøm fase 2 (A): ");
-	//debugger->print(String((float)hanReader.getInt(90,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(90,2)/10);
-	mqtt.publish("ams2mqtt/current/phase2", value);
-	debugger->print(value);
-
-	// 92-93: Strøm fase 3 (A) *10
-	debugger->print("  Strøm fase 3 (A): ");
-	//debugger->println(String((float)hanReader.getInt(92,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(92,2)/10);
-	mqtt.publish("ams2mqtt/current/phase3", value);
-	debugger->println(value);
-
-	// 82-83: Spenning fase 1 (V) *10
-	debugger->print("Spenning fase 1 (V): ");
-	//debugger->print(String((float)hanReader.getInt(82,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(82,2)/10);
-	mqtt.publish("ams2mqtt/voltage/phase1", value);
-	debugger->print(value);
-
-	// 84-85: Spenning fase 2 (V) *10
-	debugger->print("  Spenning fase 2 (V): ");
-	//debugger->print(String((float)hanReader.getInt(84,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(84,2)/10);
-	mqtt.publish("ams2mqtt/voltage/phase2", value);
-	debugger->print(value);
-
-	// 86-87: Spenning fase 3 (V) *10
-	debugger->print("  Spenning fase 3 (V): ");
-	//debugger->println(String((float)hanReader.getInt(86,2)/10));
-	sprintf(value, "%.1f", (float)hanReader.getInt(86,2)/10);
-	mqtt.publish("ams2mqtt/voltage/phase3", value);
-	debugger->println(value);
-
-	// 94-95: Frekvens (Hz) *100
-	debugger->print("Frekvens: ");
-	sprintf(value, "%.2f", (float)hanReader.getInt(94,2)/100);
-	mqtt.publish("ams2mqtt/energy/frequency", value);
-	debugger->println(value);
-
-// Ukjente variabler
-
-	// 32-39: Reaktiv energi R+ (Wh)
-	debugger->print("Reaktiv energi R+ (Wh):    ");
-	sprintf(value, "%.2f", ((float)hanReader.getInt(32,4)/1000));
-	mqtt.publish("ams2mqtt/energy/reactive/posacc", value);
-	debugger->print(value);
-
-	// 40-47: Reaktiv energi R- (Wh)
-	debugger->print(" Reaktiv energi R- (Wh):    ");
-	//debugger->print(String((float)hanReader.getInt(40,4)/1000));
-	sprintf(value, "%.2f", (float)hanReader.getInt(40,4)/1000);
-	mqtt.publish("ams2mqtt/energy/reactive/negacc", value);
-	debugger->print(value);
-
-
-	// 56-59: Reaktiv effekt R+ (W)
-	debugger->print("  Reaktiv effekt R+ (W): ");
-	sprintf(value, "%d", hanReader.getInt(56,4));
-	mqtt.publish("ams2mqtt/power/reactive/rpos", value);
-	debugger->print(value);
-
-	// 56-59: Reaktiv effekt R+ (W)
-	debugger->print("  Reaktiv effekt R- (W): ");
-	sprintf(value, "%d", hanReader.getInt(60,4));
-	mqtt.publish("ams2mqtt/power/reactive/rneg", value);
-	debugger->print(value);
-
-	// 64-67: Ukjent
-	debugger->print("  Ukjent 1: ");
-	sprintf(value, "%d", hanReader.getInt(64,2));
-	mqtt.publish("ams2mqtt/power/unknown/1", value);
-	debugger->print(value);
-
-	// 64-67: Ukjent
-	debugger->print("  Ukjent 2: ");
-	sprintf(value, "%d", hanReader.getInt(66,2));
-	mqtt.publish("ams2mqtt/power/unknown/2", value);
-	debugger->print(value);
-	// 64-67: Ukjent
-	debugger->print("  Ukjent 3: ");
-	sprintf(value, "%d", hanReader.getInt(68,2));
-	mqtt.publish("ams2mqtt/power/unknown/3", value);
-	debugger->println(value);
-
-
-
-	data["tPI"] = String((float)hanReader.getInt(16,4)/1000);
-	data["tPO"] = hanReader.getInt(20,4);
-	data["P1"] = hanReader.getInt(70,2);
-	data["P2"] = hanReader.getInt(74,2);
-	data["P3"] = hanReader.getInt(78,2);
-	data["f"] = String((float)hanReader.getInt(94,2)/100);
-
-	// Publish the json to the MQTT server
-	char msg[1024];
-	root.printTo(msg, 1024);
-	mqtt.publish(ap.config.mqttPublishTopic, msg);
-
-	hanReader.Clear();
-}
-
-void WriteAndEmptyBuffer()
-{
-	debugger->println();
-//	debugger->println($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - Received {gBuffer.Count} (0x{gBuffer.Count:X2}) bytes]");
-/*
-	int j = 0;
-	foreach (var vByte in gBuffer)
-	{
-		debugger->println(string.Format("{0:X2} ", (int)vByte));
-
-		if (++j % 8 == 0)
-			debugger->println(" ");
-
-		if (j % 24 == 0)
+		// Write the json to the debug port
+		if (debugger && listSize != 0x01 && listSize != 0x0D) {
+			debugger->print("Sending data to MQTT: ");
+			root.printTo(*debugger);
 			debugger->println();
-	}
+		}
 
-	debugger->println();
-	debugger->println();
-*/
-	//gBuffer.Clear();
+		// Make sure we have configured a publish topic
+		if (ap.config.mqttPublishTopic == 0 || strlen(ap.config.mqttPublishTopic) == 0)
+			return;
+
+		// Publish the json to the MQTT server
+		char msg[1024];
+		root.printTo(msg, 1024);
+		mqtt.publish(ap.config.mqttPublishTopic, msg);
+	}
 }
 
 void readHanPort_Kamstrup(int listSize)

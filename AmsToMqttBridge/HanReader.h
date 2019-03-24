@@ -8,8 +8,8 @@
 #endif
 
 
-//#include "DlmsReader.h"
-#include "AidonReader.h"
+#include "DlmsReader.h"
+
 
 class HanReader
 {
@@ -26,21 +26,19 @@ public:
 	int getListSize();
 	time_t getPackageTime();
 	int getInt(int objectId);
-	int getInt(int start, int size);
 	String getString(int objectId);
-	String getString(int start, int Length);
 	time_t getTime(int objectId);
-	void Clear();
 
 private:
 	Stream *debug;
 	HardwareSerial *han;
 	byte buffer[512];
 	int bytesRead;
-	AidonReader reader;
+	DlmsReader reader;
 	int listSize;
 
 	int findValuePosition(int dataPosition, byte *buffer, int start, int length);
+	int getStructureSize(byte *buffer, int index);
 
 	time_t getTime(int dataPosition, byte *buffer, int start, int length);
 	time_t getTime(byte *buffer, int start, int length);

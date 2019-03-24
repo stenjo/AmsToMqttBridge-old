@@ -18,7 +18,6 @@ class DlmsReader
     DlmsReader();
     bool Read(byte data);
     int GetRawData(byte *buffer, int start, int length);
-    void Clear();
     
   protected:
     Crc16Class Crc16;
@@ -33,6 +32,7 @@ class DlmsReader
     byte sourceAddress[DLMS_READER_MAX_ADDRESS_SIZE];
     byte sourceAddressLength;
 
+    void Clear();
     int GetAddress(int addressPosition, byte* buffer, int start, int length);
     unsigned short GetChecksum(int checksumPosition);
     bool IsValidFrameFormat(byte frameFormatType);

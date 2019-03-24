@@ -22,16 +22,12 @@ void HanReader::setup(HardwareSerial *hanPort, unsigned long baudrate, SerialCon
 
 void HanReader::setup(HardwareSerial *hanPort)
 {
-	setup(hanPort, 9600, SERIAL_8N1, NULL);
+	setup(hanPort, 2400, SERIAL_8E1, NULL);
 }
 
 void HanReader::setup(HardwareSerial *hanPort, Stream *debugPort)
 {
-	setup(hanPort, 9600, SERIAL_8N1, debugPort);
-}
-
-void HanReader::Clear() {
-	reader.Clear();
+	setup(hanPort, 2400, SERIAL_8E1, debugPort);
 }
 
 bool HanReader::read(byte data)
@@ -39,14 +35,6 @@ bool HanReader::read(byte data)
 	if (reader.Read(data))
 	{
 		bytesRead = reader.GetRawData(buffer, 0, 512);
-		if (debug)
-		{
-			debug->println(" ");
-			debug->print("Got valid SLIP data (");
-			debug->print(bytesRead);
-			debug->println(" bytes):");
-			debugPrint(buffer, 0, bytesRead);
-		}
 
 		/*
 			Data should start with E6 E7 00 0F
@@ -64,13 +52,23 @@ bool HanReader::read(byte data)
 			buffer[3] != 0x0F
 		)
 		{
-			//if (debug) debug->println("Invalid HAN data: Start should be E6 E7 00 0F");
-			//return false;
+			if (debug) debug->println("Invalid HAN data: Start should be E6 E7 00 0F");
+			return false;
 		}
 
-		//if (debug) debug->println("HAN data is valid");
-		listSize = getInt(0, buffer, 0, bytesRead);
-		listSize = bytesRead;
+		if (debug && buffer[10] != 0x01 && buffer[10] != 0x0D)
+		{
+			debug->println("");
+			debug->println("**************************************************************************************************");
+			debug->print("Got valid DLMS data (");
+			debug->print(bytesRead);
+			debug->println(" bytes):");
+			debugPrint(buffer, 0, bytesRead);
+			debug->println("--------------------------------------------------------------------------------------------------");
+			debug->println("HAN data is valid");
+		}
+//		listSize = getInt(0, buffer, 0, bytesRead);
+		listSize = buffer[10];
 		return true;
 	}
 }
@@ -126,42 +124,41 @@ int HanReader::getInt(int objectId)
 	return getInt(objectId, buffer, 0, bytesRead);
 }
 
-int HanReader::getInt(int start, int size)
-{
-
-	int value = 0;
-	int bytes = 0;
-	int mask = 0x01;		// Use if negative value (MSB = 1)
-
-	for (int i = start + size -1; i >= start; i--)
-	{
-		mask = mask << 8;
-		value = value << 8 | buffer[i];
-	}
-
-	if (buffer[start+size-1] >= 0x80) {	// Negative value
-		return value - mask;
-	}
-
-	return value;
-
-}
-
 String HanReader::getString(int objectId)
 {
 	return getString(objectId, buffer, 0, bytesRead);
 }
 
-String HanReader::getString(int start, int Length)
+int HanReader::getStructureSize(byte *buffer, int index) 
 {
-	String value = String("");
-	for (int i = start; i < start + Length; i++)
-	{
-		value += String((char)buffer[i]);
-	}
-	return value;
-}
+	
+	int size = 2;
 
+	if (buffer[index] == 0x01 || buffer[index] == 0x02 ){
+		for (int i = 0; i < buffer[index+1]; i++ )
+			size += getStructureSize(buffer, index + size);
+
+		return size;
+	}
+
+	switch (buffer[index])
+	{
+		case 0x06:
+			return size + 3;
+		
+		case 0x10:
+		case 0x12:
+			return size + 1;
+		
+		case 0x0A:
+		case 0x09:
+			return size + buffer[index+1];
+	
+		default:
+			break;
+	}
+	return size;
+}
 
 int HanReader::findValuePosition(int dataPosition, byte *buffer, int start, int length)
 {
@@ -170,15 +167,45 @@ int HanReader::findValuePosition(int dataPosition, byte *buffer, int start, int 
 	int headerSize = dataHeader + (compensateFor09HeaderBug ? 1 : 0);
 	int firstData = headerSize + buffer[headerSize] + 1;
 
-	for (int i = start + firstData; i<length; i++)
+	// if (debug)
+	// {
+	// 	debug->print("dataPosition: ");
+	// 	debug->println(dataPosition);
+	// 	debug->print("firstData: ");
+	// 	debug->println(firstData);
+	// }
+
+	int i = start + firstData;
+	if (buffer[i] == 0x01) // Array indicator. Skip
+		i += 2;
+
+	while (dataPosition > 1) {
+		int savedi = i;
+		i += getStructureSize(buffer, i);
+		// debug->print("Added ");
+		// debug->print(i-savedi);
+		// debug->println(" bytes to i");
+		dataPosition--;
+	}
+	
+	i += 4 + buffer[i+3];	//Account for the OBIS code as first part of a 
+
+	return i;
+
+	for (; i<length; i++)
 	{
 		if (dataPosition-- == 0)
 			return i;
+		else if (buffer[i] == 0x02) // byte value (1 byte)
+		{
+			i += 1;
+			dataPosition++;
+		}
 		else if (buffer[i] == 0x0A) // OBIS code value
 			i += buffer[i + 1] + 1;
 		else if (buffer[i] == 0x09) // string value
 			i += buffer[i + 1] + 1;
-		else if (buffer[i] == 0x02) // byte value (1 byte)
+		else if (buffer[i] == 0x0F) // byte value (1 byte)
 			i += 1;
 		else if (buffer[i] == 0x12) // integer value (2 bytes)
 			i += 2;
@@ -240,18 +267,34 @@ time_t HanReader::getTime(byte *buffer, int start, int length)
 
 int HanReader::getInt(int dataPosition, byte *buffer, int start, int length)
 {
+
+	// debug->println("--------------------------------------------");
 	int valuePosition = findValuePosition(dataPosition, buffer, start, length);
+	// if (debug)
+	// {
+	// 	debug->print("dataPosition: ");
+	// 	debug->println(dataPosition);
+	// 	debug->print("valuePosition: ");
+	// 	debug->println(valuePosition);
+	// 	debug->print("buffer[valuePosition]: ");
+	// 	debug->println(buffer[valuePosition], HEX);
+	// 	debugPrint(buffer, valuePosition, buffer[valuePosition+1]+2);
+
+	// }
 
 	if (valuePosition > 0)
 	{
 		int value = 0;
 		int bytes = 0;
+		bool signedInt = false;
 		switch (buffer[valuePosition++])
 		{
-			case 0x12: 
+			case 0x10: //Int16
+				signedInt = true;
+			case 0x12: // Uint16
 				bytes = 2;
 				break;
-			case 0x06:
+			case 0x06:	// Uint32
 				bytes = 4;
 				break;
 			case 0x02:
@@ -263,6 +306,11 @@ int HanReader::getInt(int dataPosition, byte *buffer, int start, int length)
 		{
 			value = value << 8 | buffer[i];
 		}
+		if (signedInt) {
+			if (bytes == 2 && value > 0x7FFF) {
+				value = value - 0x10000;
+			}
+		} 
 
 		return value;
 	}
@@ -271,7 +319,19 @@ int HanReader::getInt(int dataPosition, byte *buffer, int start, int length)
 
 String HanReader::getString(int dataPosition, byte *buffer, int start, int length)
 {
+	// debug->println("--------------------------------------------");
 	int valuePosition = findValuePosition(dataPosition, buffer, start, length);
+	// if (debug)
+	// {
+	// 	debug->print("dataPosition: ");
+	// 	debug->println(dataPosition);
+	// 	debug->print("valuePosition: ");
+	// 	debug->println(valuePosition);
+	// 	debug->print("buffer[valuePosition]: ");
+	// 	debug->println(buffer[valuePosition], HEX);
+	// 	debugPrint(buffer, valuePosition, buffer[valuePosition+1]+2);
+
+	// }
 	if (valuePosition > 0)
 	{
 		String value = String("");

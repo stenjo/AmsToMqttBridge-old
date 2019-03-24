@@ -1,77 +1,21 @@
 {
     "configurations": [
         {
-            "name": "Mac",
-            "includePath": [
-                "/usr/include",
-                "/usr/local/include",
-                "${workspaceFolder}"
-            ],
-            "defines": [],
-            "intelliSenseMode": "clang-x64",
-            "browse": {
-                "path": [
-                    "/usr/include",
-                    "/usr/local/include",
-                    "${workspaceFolder}"
-                ],
-                "limitSymbolsToIncludedHeaders": true,
-                "databaseFilename": ""
-            },
-            "macFrameworkPath": [
-                "/System/Library/Frameworks",
-                "/Library/Frameworks"
-            ]
-        },
-        {
-            "name": "Linux",
-            "includePath": [
-                "/usr/include",
-                "/usr/local/include",
-                "${workspaceFolder}"
-            ],
-            "defines": [],
-            "intelliSenseMode": "clang-x64",
-            "browse": {
-                "path": [
-                    "/usr/include",
-                    "/usr/local/include",
-                    "${workspaceFolder}"
-                ],
-                "limitSymbolsToIncludedHeaders": true,
-                "databaseFilename": ""
-            }
-        },
-        {
             "name": "Win32",
             "includePath": [
-                "${workspaceFolder}",
                 "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.4.1\\cores\\esp8266",
-                "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\PubSubClient\\src",
-                "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\MAX31850_DallasTemp",
-                "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\DallasTemperature",
-                "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\OneWire",
-                "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\ArduinoJson\\src"
+                "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.5.0-beta2\\**",
+                "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\tools\\**",
+                "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.4.1\\**",
+                "C:\\Program Files (x86)\\Arduino\\libraries\\**"
             ],
-            "defines": [
-                "_DEBUG",
-                "UNICODE",
-                "_UNICODE"
-            ],
-            "intelliSenseMode": "msvc-x64",
             "browse": {
-                "path": [
-                    "${workspaceFolder}",
-                    "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.4.1\\cores\\esp8266",
-                    "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\PubSubClient\\src",
-                    "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\MAX31850_DallasTemp",
-                    "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\DallasTemperature",
-                    "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\OneWire",
-                    "C:\\Users\\sten.johnsen\\Documents\\Arduino\\libraries\\ArduinoJson\\src"
-                ],
                 "limitSymbolsToIncludedHeaders": false,
-                "databaseFilename": ""
+                "path": [
+                    "C:\\Users\\sten.johnsen\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.4.1\\cores\\esp8266"
+                ]
             },
+            "intelliSenseMode": "msvc-x64",
             "cStandard": "c11",
             "cppStandard": "c++17"
         }
